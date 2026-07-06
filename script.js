@@ -73,6 +73,12 @@ function bindEvents() {
   els.searchInput.addEventListener("input", renderRecords);
   els.editForm.addEventListener("submit", updateRecord);
   els.cancelEditBtn.addEventListener("click", () => els.editDialog.close());
+
+  [els.indexInput, els.editIndex].forEach((input) => {
+    input.addEventListener("input", () => {
+      input.value = input.value.replace(/[^0-9., ]/g, "");
+    });
+  });
 }
 
 function getConfiguredApiUrl() {
@@ -128,19 +134,18 @@ async function addRecord(event) {
 
   const date = els.dateInput.value || todayISO();
   const radio = els.radioSelect.value.trim();
-  const index = Number(els.indexInput.value);
+  const index = parseIndexValue(els.indexInput.value);
 
   if (!radio) return setStatus(els.formStatus, "Choisir radio.", "error");
-  if (!Number.isFinite(index) || index < 0) return setStatus(els.formStatus, "Index incorrect.", "error");
+  if (index === null) return setStatus(els.formStatus, "Index invalide. Entrez فقط chiffres, مثلا 15420.", "error");
 
   els.saveBtn.disabled = true;
   setStatus(els.formStatus, "Enregistrement...", "warn");
 
   try {
-    const result = await apiPost({ action: "add", date, radio, index });
+    const result = await apiJsonp({ action: "add", date, radio, index });
     if (!result.ok) {
-      const msg = result.error === "INDEX_ERRONE" ? "Index erroné" : (result.message || "Erreur d'enregistrement.");
-      setStatus(els.formStatus, msg, "error");
+      setStatus(els.formStatus, getServerMessage(result), "error");
       return;
     }
     els.indexInput.value = "";
@@ -200,7 +205,7 @@ async function loadRecords(showMessage) {
 
   if (showMessage) setStatus(els.formStatus, "Actualisation...", "warn");
   try {
-    const result = await apiGet({ action: "list", pin: state.adminPin, t: Date.now() });
+    const result = await apiJsonp({ action: "list", pin: state.adminPin });
     if (!result.ok) {
       if (result.error === "BAD_PIN") {
         logoutAdmin();
@@ -277,23 +282,23 @@ async function updateRecord(event) {
   event.preventDefault();
   if (!ensureApi()) return;
 
+  const index = parseIndexValue(els.editIndex.value);
+  if (index === null) return setStatus(els.editStatus, "Index invalide. Entrez فقط chiffres.", "error");
+
   const payload = {
     action: "update",
     pin: state.adminPin,
     id: els.editId.value,
     date: els.editDate.value,
     radio: els.editRadio.value,
-    index: Number(els.editIndex.value),
+    index,
   };
-
-  if (!Number.isFinite(payload.index) || payload.index < 0) return setStatus(els.editStatus, "Index incorrect.", "error");
 
   setStatus(els.editStatus, "Modification...", "warn");
   try {
-    const result = await apiPost(payload);
+    const result = await apiJsonp(payload);
     if (!result.ok) {
-      const msg = result.error === "INDEX_ERRONE" ? "Index erroné" : (result.message || "Erreur de modification.");
-      setStatus(els.editStatus, msg, "error");
+      setStatus(els.editStatus, getServerMessage(result), "error");
       return;
     }
     els.editDialog.close();
@@ -306,8 +311,8 @@ async function updateRecord(event) {
 async function deleteRecord(id) {
   if (!confirm("Supprimer cet index ?")) return;
   try {
-    const result = await apiPost({ action: "delete", pin: state.adminPin, id });
-    if (!result.ok) throw new Error(result.message || "Erreur suppression.");
+    const result = await apiJsonp({ action: "delete", pin: state.adminPin, id });
+    if (!result.ok) throw new Error(getServerMessage(result));
     await loadRecords(true);
   } catch (err) {
     setStatus(els.formStatus, readableError(err), "error");
@@ -356,23 +361,41 @@ function exportExcel() {
   URL.revokeObjectURL(a.href);
 }
 
-async function apiGet(params) {
-  const url = new URL(state.apiUrl);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const response = await fetch(url.toString(), { method: "GET", cache: "no-store" });
-  if (!response.ok) throw new Error("Connexion impossible.");
-  return response.json();
-}
+function apiJsonp(params) {
+  return new Promise((resolve, reject) => {
+    const callbackName = "jsonp_cb_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+    const script = document.createElement("script");
+    const url = new URL(state.apiUrl);
 
-async function apiPost(payload) {
-  const body = new URLSearchParams();
-  body.set("payload", JSON.stringify(payload));
-  const response = await fetch(state.apiUrl, {
-    method: "POST",
-    body,
+    Object.entries({ ...params, callback: callbackName, t: Date.now() }).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+    });
+
+    const cleanup = () => {
+      delete window[callbackName];
+      script.remove();
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Connexion impossible. Vérifiez le déploiement Apps Script."));
+    }, 15000);
+
+    window[callbackName] = (data) => {
+      clearTimeout(timer);
+      cleanup();
+      resolve(data || { ok: false, message: "Réponse vide." });
+    };
+
+    script.onerror = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(new Error("Lien Apps Script invalide ou non autorisé."));
+    };
+
+    script.src = url.toString();
+    document.body.appendChild(script);
   });
-  if (!response.ok) throw new Error("Connexion impossible.");
-  return response.json();
 }
 
 function ensureApi() {
@@ -380,6 +403,29 @@ function ensureApi() {
   showSetup("Collez d'abord le lien Apps Script.");
   setStatus(els.formStatus, "Application non connectée à Google Sheets.", "error");
   return false;
+}
+
+function parseIndexValue(value) {
+  const cleaned = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/,/g, ".");
+
+  if (!cleaned) return null;
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
+
+  const number = Number(cleaned);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return number;
+}
+
+function getServerMessage(result) {
+  if (result.error === "INDEX_ERRONE") return "Index erroné";
+  if (result.error === "DUPLICATE") return "Cette radio est déjà enregistrée aujourd'hui.";
+  if (result.error === "BAD_INDEX") return "Index invalide. Entrez فقط chiffres.";
+  if (result.error === "BAD_RADIO") return "Radio invalide.";
+  if (result.error === "BAD_PIN") return "PIN admin incorrect.";
+  return result.message || "Erreur.";
 }
 
 function setStatus(el, message, type) {
@@ -420,7 +466,7 @@ function escapeHtml(value) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
 

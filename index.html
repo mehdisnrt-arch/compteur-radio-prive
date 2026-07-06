@@ -50,7 +50,7 @@
         </select>
 
         <label for="indexInput">Index</label>
-        <input id="indexInput" name="index" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Ex: 15420" required />
+        <input id="indexInput" name="index" type="text" inputmode="numeric" pattern="[0-9 ]*" placeholder="Ex: 15420" required />
 
         <button id="saveBtn" class="primary big" type="submit">Enregistrer</button>
       </form>
@@ -97,7 +97,7 @@
       <select id="editRadio" required></select>
 
       <label for="editIndex">Index</label>
-      <input id="editIndex" type="number" inputmode="decimal" min="0" step="0.01" required />
+      <input id="editIndex" type="text" inputmode="numeric" pattern="[0-9 ]*" required />
 
       <p id="editStatus" class="status"></p>
       <div class="actions-row">

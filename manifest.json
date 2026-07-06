@@ -1,0 +1,22 @@
+{
+  "name": "Index Compteur Radio",
+  "short_name": "Index Radio",
+  "description": "Saisie partagée des indexes de compteur électrique des radios privées.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#eef7f5",
+  "theme_color": "#0f766e",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
